@@ -233,6 +233,27 @@ class WhatsAppClient {
     if (!clean.startsWith('90')) clean = '90' + clean;
     const jid = `${clean}@s.whatsapp.net`;
 
+    // ── ÇİFT MESAJ ENGELLEME (Anti-Duplicate Deduplication - Son 45 Saniye) ──
+    const now = Date.now();
+    const msgFingerprint = `${clean}_${message.slice(0, 40).replace(/\s+/g, '')}`;
+    if (!this._recentMessages) this._recentMessages = new Map();
+
+    if (this._recentMessages.has(msgFingerprint)) {
+      const lastSent = this._recentMessages.get(msgFingerprint);
+      if (now - lastSent < 45000) {
+        console.warn(`[WhatsAppClient] ⚠️ Çift mesaj engellendi (Son 45 sn içinde bu mesaj zaten iletildi): ${clean}`);
+        return { success: true, duplicateBlocked: true };
+      }
+    }
+    this._recentMessages.set(msgFingerprint, now);
+
+    // Bellek temizliği (100 kaydı aşarsa eski kayıtları sil)
+    if (this._recentMessages.size > 100) {
+      for (const [k, time] of this._recentMessages) {
+        if (now - time > 60000) this._recentMessages.delete(k);
+      }
+    }
+
     console.log(`[WhatsAppClient] Mesaj gönderiliyor -> ${jid}`);
 
     // Güvenlik & İnsansı Gecikme (Anti-Ban)
