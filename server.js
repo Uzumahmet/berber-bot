@@ -11,6 +11,16 @@ const SUPABASE_URL = process.env.SUPABASE_URL || 'https://rkqrlhkdcgspxpgywvtq.s
 const SUPABASE_KEY = process.env.SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJrcXJsaGtkY2dzcHhwZ3l3dnRxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg1MDk1NzksImV4cCI6MjEwNDA4NTU3OX0.7M-fQC6zQSNZsrmDEu7dh6kApxpn9aHnCRbCZtXoh18';
 const SESSION_ID = process.env.SESSION_ID || 'berber_main';
 const AUTH_DIR = process.env.AUTH_DIR || './auth_info';
+const ADMIN_PIN = process.env.ADMIN_PIN || '261946';
+
+// Tehlikeli eylemler için PIN koruması middleware'i
+function checkAdminPin(req, res, next) {
+  const pin = req.headers['x-admin-pin'] || req.body?.pin || req.query?.pin;
+  if (pin === ADMIN_PIN) {
+    return next();
+  }
+  return res.status(401).json({ success: false, error: 'Yetkisiz erişim: 6 haneli Yönetici PIN kodu geçersiz veya eksik.' });
+}
 
 // 1. Supabase İstemcisi
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -76,8 +86,18 @@ app.post('/api/send', async (req, res) => {
   }
 });
 
-// Soketi zorla yenileme (Taze QR ve Eşleşme için)
-app.post('/api/restart', async (req, res) => {
+// PIN doğrulama endpoint'i
+app.post('/api/verify-pin', (req, res) => {
+  const { pin } = req.body;
+  if (pin === ADMIN_PIN) {
+    res.json({ success: true, message: 'PIN doğrulandı.' });
+  } else {
+    res.status(401).json({ success: false, error: 'Hatalı 6 haneli PIN kodu!' });
+  }
+});
+
+// Soketi zorla yenileme (Taze QR ve Eşleşme için - PIN Korumalı)
+app.post('/api/restart', checkAdminPin, async (req, res) => {
   try {
     await wa.restart();
     res.json({ success: true, message: 'Soket yeniden başlatıldı.' });
@@ -86,8 +106,8 @@ app.post('/api/restart', async (req, res) => {
   }
 });
 
-// Oturumu tamamen sıfırlama (Temiz sıfırdan başlama)
-app.post('/api/reset', async (req, res) => {
+// Oturumu tamamen sıfırlama (Temiz sıfırdan başlama - PIN Korumalı)
+app.post('/api/reset', checkAdminPin, async (req, res) => {
   try {
     await wa.clearAndReset();
     res.json({ success: true, message: 'Oturum sıfırlandı ve temiz soket başlatıldı.' });
@@ -96,8 +116,8 @@ app.post('/api/reset', async (req, res) => {
   }
 });
 
-// Oturumu kapatma
-app.post('/api/logout', async (req, res) => {
+// Oturumu kapatma (PIN Korumalı)
+app.post('/api/logout', checkAdminPin, async (req, res) => {
   try {
     await wa.logout();
     res.json({ success: true, message: 'Oturum kapatıldı.' });
@@ -184,83 +204,167 @@ app.get('/', (req, res) => {
 </head>
 <body>
   <div class="card">
-    <!-- Üst Kontrol & Zorla Yenileme Çubuğu -->
-    <div class="top-actions">
-      <button type="button" class="btn-action" onclick="forcePageReload()" title="Sayfayı Tarayıcı Önbelleğini Atlayarak Yeniler">
-        🔄 Zorla Yenile
-      </button>
-      <button type="button" class="btn-action" onclick="forceResetSession()" title="Tüm bağlantı artıklarını temizler ve sıfırdan başlar" style="color: #f87171;">
-        🧹 Sıfırla &amp; Temiz Başlat
-      </button>
-    </div>
-
-    <h1>💈 Berber-X WhatsApp Asistanı</h1>
-    <p>Dükkanda bilgisayar olmadan 7/24 otomatik randevu onayı ve hatırlatma gönderen bulut servisi.</p>
-
-    <!-- Bildirim Kutusu (Sayfayı kilitlemeyen bildirimler) -->
-    <div id="toastBox" class="toast-box"></div>
-
-    <div id="statusBadge" class="status-badge ${status.connected ? 'status--connected' : (status.status === 'connecting' ? 'status--connecting' : 'status--disconnected')}">
-      <span class="pulse"></span>
-      <span id="statusText">
-        ${status.connected ? '🟢 Bağlı: ' + (status.user?.phone || 'Aktif') : (status.status === 'connecting' ? '🟡 Bağlanıyor / QR Bekleniyor...' : '🔴 Bağlantı Yok')}
-      </span>
-    </div>
-
-    ${status.connected ? `
-      <div style="background: rgba(37,211,102,0.06); border: 1px solid rgba(37,211,102,0.2); border-radius: 12px; padding: 18px; margin-bottom: 16px;">
-        <p style="margin: 0; color: #fff; font-size: 15px;">✅ <b>WhatsApp 7/24 Devrede!</b></p>
-        <p style="margin: 8px 0 0; font-size: 13px; color: var(--text-muted);">Müşteriler randevu aldığında veya randevu saati yaklaştığında sistem bu telefondan otomatik WhatsApp mesajı gönderir.</p>
+    <!-- 🔒 1. PIN KİLİT EKRANI (Varsayılan olarak açık) -->
+    <div id="pinScreen" style="display:block; padding:10px 0 10px;">
+      <div style="width:68px; height:68px; border-radius:50%; background:rgba(37,211,102,0.1); border:1px solid rgba(37,211,102,0.3); display:flex; align-items:center; justify-content:center; margin:0 auto 16px; font-size:32px;">
+        🔒
       </div>
-      <button class="btn-secondary" onclick="logout()" style="color: #ef4444; border-color: rgba(239,68,68,0.3);">Bağlantıyı Kes / Çıkış Yap</button>
-    ` : `
-      <div class="qr-container" id="qrBox">
-        <div style="display:flex; justify-content:center; align-items:center; gap:8px; margin-bottom:10px;">
-          <span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:#25d366;"></span>
-          <b style="font-size:13px; color:#25d366;">Canlı QR Kod (Otomatik Güncellenir)</b>
-        </div>
-        
-        <img id="qrImg" src="${status.qrImage || ''}" alt="QR Kod Bekleniyor..." />
-        
-        <div style="margin-top:10px; display:flex; justify-content:center; gap:8px;">
-          <button type="button" id="refreshQrBtn" class="btn-action" onclick="manualRefreshQR()" style="padding:8px 16px; font-size:13px;">
-            🔄 Taze QR Kod Üret
+      <h2 style="font-size:20px; font-weight:700; margin-bottom:8px;">Yönetici Güvenlik Kilidi</h2>
+      <p style="font-size:13px; color:var(--text-muted); margin-bottom:20px; line-height:1.5;">
+        Bu panel salon yönetimine aittir.<br>Lütfen 6 haneli güvenlik PIN kodunu giriniz.
+      </p>
+
+      <div id="pinToastBox" class="toast-box"></div>
+
+      <div class="input-group" style="max-width:240px; margin:0 auto 16px;">
+        <input type="password" id="pinInput" maxlength="6" inputmode="numeric" pattern="[0-9]*" placeholder="••••••" style="text-align:center; font-size:26px; letter-spacing:8px; font-family:monospace; font-weight:800; padding:12px;" onkeyup="if(event.key==='Enter') submitPin()" />
+      </div>
+      <button type="button" class="btn-main" onclick="submitPin()" style="max-width:240px; margin:0 auto; display:block;">🔓 Kilidi Aç</button>
+      <p style="font-size:11.5px; color:var(--text-muted); margin-top:16px;">
+        * Yabancıların bot ayarlarına ve çıkış işlemlerine erişmesini engeller.
+      </p>
+    </div>
+
+    <!-- 📊 2. ANA PANEL (Sadece PIN doğrulandıktan sonra görünür) -->
+    <div id="dashboardScreen" style="display:none;">
+      <!-- Üst Kontrol & Zorla Yenileme Çubuğu -->
+      <div class="top-actions">
+        <div style="display:flex; gap:6px;">
+          <button type="button" class="btn-action" onclick="forcePageReload()" title="Sayfayı Tarayıcı Önbelleğini Atlayarak Yeniler">
+            🔄 Yenile
+          </button>
+          <button type="button" class="btn-action" onclick="forceResetSession()" title="Tüm bağlantı artıklarını temizler ve sıfırdan başlar" style="color: #f87171;">
+            🧹 Sıfırla
           </button>
         </div>
-        <p style="font-size:12px; color:var(--text-muted); margin-top:8px;">
-          * WhatsApp &gt; Bağlı Cihazlar &gt; Cihaz Bağla diyerek kamerayı bu koda tutun.
-        </p>
+        <button type="button" class="btn-action" onclick="lockPanel()" style="color: #94a3b8;" title="Paneli Güvenle Kilitle">
+          🔒 Kilitle
+        </button>
       </div>
 
-      <div style="margin:18px 0 14px; border-top:1px solid var(--border); padding-top:14px;">
-        <span style="font-size:12px; color:var(--text-muted); background:var(--card); padding:0 8px; font-weight: 600;">VEYA KOD İLE BAĞLAN</span>
+      <h1>💈 Berber-X WhatsApp Asistanı</h1>
+      <p>Dükkanda bilgisayar olmadan 7/24 otomatik randevu onayı ve hatırlatma gönderen bulut servisi.</p>
+
+      <!-- Bildirim Kutusu (Sayfayı kilitlemeyen bildirimler) -->
+      <div id="toastBox" class="toast-box"></div>
+
+      <div id="statusBadge" class="status-badge ${status.connected ? 'status--connected' : (status.status === 'connecting' ? 'status--connecting' : 'status--disconnected')}">
+        <span class="pulse"></span>
+        <span id="statusText">
+          ${status.connected ? '🟢 Bağlı: ' + (status.user?.phone || 'Aktif') : (status.status === 'connecting' ? '🟡 Bağlanıyor / QR Bekleniyor...' : '🔴 Bağlantı Yok')}
+        </span>
       </div>
 
-      <div class="input-group">
-        <label>WhatsApp Telefon Numaranız</label>
-        <input type="text" id="phoneInput" value="${defaultPhone}" placeholder="0542 262 88 30" />
-      </div>
-      <button id="pairBtn" class="btn-main" onclick="getPairingCode()">📲 8 Haneli Eşleşme Kodu Al</button>
-
-      <div id="codeBox" class="code-box">
-        <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 6px;">WHATSAPP EŞLEŞME KODU:</div>
-        <div id="codeDisplay" class="code-text">----</div>
-        <button type="button" class="btn-action" onclick="copyCode()" style="margin: 8px auto 0; display: inline-flex;">📋 Kodu Kopyala</button>
-        <div class="steps">
-          <b>Telefonundan Nasıl Bağlanırsın?</b>
-          <ol>
-            <li>Telefonunda WhatsApp'ı aç.</li>
-            <li>Sağ üstteki <b>Üç Nokta</b> veya <b>Ayarlar</b>'a dokun.</li>
-            <li><b>Bağlı Cihazlar</b> &gt; <b>Cihaz Bağla</b>'ya bas.</li>
-            <li>Alttaki <b>"Telefon numarası ile bağla"</b> yazısına dokun.</li>
-            <li>Yukarıdaki 8 haneli kodu telefonuna gir.</li>
-          </ol>
+      ${status.connected ? `
+        <div style="background: rgba(37,211,102,0.06); border: 1px solid rgba(37,211,102,0.2); border-radius: 12px; padding: 18px; margin-bottom: 16px;">
+          <p style="margin: 0; color: #fff; font-size: 15px;">✅ <b>WhatsApp 7/24 Devrede!</b></p>
+          <p style="margin: 8px 0 0; font-size: 13px; color: var(--text-muted);">Müşteriler randevu aldığında veya randevu saati yaklaştığında sistem bu telefondan otomatik WhatsApp mesajı gönderir.</p>
         </div>
-      </div>
-    `}
+        <button class="btn-secondary" onclick="logout()" style="color: #ef4444; border-color: rgba(239,68,68,0.3);">Bağlantıyı Kes / Çıkış Yap</button>
+      ` : `
+        <div class="qr-container" id="qrBox">
+          <div style="display:flex; justify-content:center; align-items:center; gap:8px; margin-bottom:10px;">
+            <span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:#25d366;"></span>
+            <b style="font-size:13px; color:#25d366;">Canlı QR Kod (Otomatik Güncellenir)</b>
+          </div>
+          
+          <img id="qrImg" src="${status.qrImage || ''}" alt="QR Kod Bekleniyor..." />
+          
+          <div style="margin-top:10px; display:flex; justify-content:center; gap:8px;">
+            <button type="button" id="refreshQrBtn" class="btn-action" onclick="manualRefreshQR()" style="padding:8px 16px; font-size:13px;">
+              🔄 Taze QR Kod Üret
+            </button>
+          </div>
+          <p style="font-size:12px; color:var(--text-muted); margin-top:8px;">
+            * WhatsApp &gt; Bağlı Cihazlar &gt; Cihaz Bağla diyerek kamerayı bu koda tutun.
+          </p>
+        </div>
+
+        <div style="margin:18px 0 14px; border-top:1px solid var(--border); padding-top:14px;">
+          <span style="font-size:12px; color:var(--text-muted); background:var(--card); padding:0 8px; font-weight: 600;">VEYA KOD İLE BAĞLAN</span>
+        </div>
+
+        <div class="input-group">
+          <label>WhatsApp Telefon Numaranız</label>
+          <input type="text" id="phoneInput" value="${defaultPhone}" placeholder="0542 262 88 30" />
+        </div>
+        <button id="pairBtn" class="btn-main" onclick="getPairingCode()">📲 8 Haneli Eşleşme Kodu Al</button>
+
+        <div id="codeBox" class="code-box">
+          <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 6px;">WHATSAPP EŞLEŞME KODU:</div>
+          <div id="codeDisplay" class="code-text">----</div>
+          <button type="button" class="btn-action" onclick="copyCode()" style="margin: 8px auto 0; display: inline-flex;">📋 Kodu Kopyala</button>
+          <div class="steps">
+            <b>Telefonundan Nasıl Bağlanırsın?</b>
+            <ol>
+              <li>Telefonunda WhatsApp'ı aç.</li>
+              <li>Sağ üstteki <b>Üç Nokta</b> veya <b>Ayarlar</b>'a dokun.</li>
+              <li><b>Bağlı Cihazlar</b> &gt; <b>Cihaz Bağla</b>'ya bas.</li>
+              <li>Alttaki <b>"Telefon numarası ile bağla"</b> yazısına dokun.</li>
+              <li>Yukarıdaki 8 haneli kodu telefonuna gir.</li>
+            </ol>
+          </div>
+        </div>
+      `}
+    </div>
   </div>
 
   <script>
+    function getStoredPin() {
+      return sessionStorage.getItem('berber_admin_pin') || '';
+    }
+
+    function showPinToast(msg, type = 'err') {
+      const t = document.getElementById('pinToastBox');
+      if (!t) return;
+      t.className = 'toast-box ' + (type === 'suc' ? 'toast--suc' : 'toast--err');
+      t.innerText = msg;
+      t.style.display = 'block';
+      setTimeout(() => { t.style.display = 'none'; }, 4000);
+    }
+
+    async function submitPin() {
+      const pin = document.getElementById('pinInput').value.trim();
+      if (pin.length !== 6) return showPinToast('Lütfen 6 haneli PIN girin!');
+
+      try {
+        const res = await fetch('/api/verify-pin', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pin })
+        });
+        const data = await res.json();
+        if (data.success) {
+          sessionStorage.setItem('berber_admin_pin', pin);
+          initScreen();
+        } else {
+          showPinToast(data.error || 'Hatalı PIN kodu!');
+        }
+      } catch (err) {
+        showPinToast('Bağlantı hatası: ' + err.message);
+      }
+    }
+
+    function lockPanel() {
+      sessionStorage.removeItem('berber_admin_pin');
+      initScreen();
+    }
+
+    function initScreen() {
+      const pin = getStoredPin();
+      const pScreen = document.getElementById('pinScreen');
+      const dScreen = document.getElementById('dashboardScreen');
+      if (pin) {
+        if (pScreen) pScreen.style.display = 'none';
+        if (dScreen) dScreen.style.display = 'block';
+      } else {
+        if (pScreen) pScreen.style.display = 'block';
+        if (dScreen) dScreen.style.display = 'none';
+        const pinInput = document.getElementById('pinInput');
+        if (pinInput) { pinInput.value = ''; pinInput.focus(); }
+      }
+    }
+
     function showToast(msg, type = 'err') {
       const t = document.getElementById('toastBox');
       if (!t) return;
@@ -281,15 +385,21 @@ app.get('/', (req, res) => {
       if (btn) btn.innerText = 'Sıfırlanıyor...';
       showToast('Bağlantı oturumu sıfırlanıyor, lütfen bekleyin...', 'info');
       try {
-        const res = await fetch('/api/reset', { method: 'POST' });
+        const res = await fetch('/api/reset', { 
+          method: 'POST',
+          headers: { 'x-admin-pin': getStoredPin() }
+        });
         const data = await res.json();
-        showToast('Sıfırlandı! Yeni taze QR kodu alınıyor...', 'suc');
-        setTimeout(() => {
-          forcePageReload();
-        }, 1500);
+        if (data.success) {
+          showToast('Sıfırlandı! Yeni taze QR kodu alınıyor...', 'suc');
+          setTimeout(() => { forcePageReload(); }, 1500);
+        } else {
+          showToast('Hata: ' + (data.error || 'Sıfırlanamadı.'));
+          if (btn) btn.innerText = '🧹 Sıfırla';
+        }
       } catch (e) {
         showToast('Sıfırlama hatası: ' + e.message);
-        if (btn) btn.innerText = '🧹 Sıfırla & Temiz Başlat';
+        if (btn) btn.innerText = '🧹 Sıfırla';
       }
     }
 
@@ -297,14 +407,18 @@ app.get('/', (req, res) => {
       const btn = document.getElementById('refreshQrBtn');
       if (btn) btn.innerText = 'Taze Kod Üretiliyor...';
       try {
-        await fetch('/api/restart', { method: 'POST' });
+        const res = await fetch('/api/restart', { 
+          method: 'POST',
+          headers: { 'x-admin-pin': getStoredPin() }
+        });
+        const data = await res.json();
         showToast('Taze QR kodu üretiliyor, lütfen bekleyin...', 'info');
         setTimeout(async () => {
-          const res = await fetch('/api/status?t=' + Date.now());
-          const data = await res.json();
-          if (data.qrImage) {
+          const sRes = await fetch('/api/status?t=' + Date.now());
+          const sData = await sRes.json();
+          if (sData.qrImage) {
             const img = document.getElementById('qrImg');
-            if (img) img.src = data.qrImage;
+            if (img) img.src = sData.qrImage;
             showToast('Yeni QR kod hazır, okutabilirsiniz!', 'suc');
           }
           if (btn) btn.innerText = '🔄 Taze QR Kod Üret';
@@ -358,13 +472,17 @@ app.get('/', (req, res) => {
 
     async function logout() {
       showToast('Çıkış yapılıyor...', 'info');
-      await fetch('/api/logout', { method: 'POST' });
+      await fetch('/api/logout', { 
+        method: 'POST',
+        headers: { 'x-admin-pin': getStoredPin() }
+      });
       setTimeout(() => { forcePageReload(); }, 1000);
     }
 
     // Durumu ve QR Kodunu 2.5 saniyede bir otomatik sorgula ve güncelle
     setInterval(async () => {
       try {
+        if (!getStoredPin()) return; // Kilitliyken arka planı sorgulama
         const res = await fetch('/api/status?t=' + Date.now());
         const data = await res.json();
         if (data.connected) {
@@ -380,6 +498,9 @@ app.get('/', (req, res) => {
         }
       } catch (e) {}
     }, 2500);
+
+    // Açılışta PIN ekranını kontrol et
+    initScreen();
   </script>
 </body>
 </html>
