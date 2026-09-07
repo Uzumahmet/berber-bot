@@ -3,7 +3,8 @@ const {
   DisconnectReason,
   useMultiFileAuthState,
   fetchLatestBaileysVersion,
-  delay
+  delay,
+  Browsers
 } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const qrcode = require('qrcode');
@@ -27,6 +28,41 @@ class WhatsAppClient {
     this._reconnectTimer = null;
   }
 
+  async restart() {
+    console.log('[WhatsAppClient] Soket zorla yeniden başlatılıyor...');
+    try {
+      if (this.sock) {
+        this.sock.end(new Error('Manual Restart'));
+      }
+    } catch(e) {}
+    this.isStarting = false;
+    this.currentQR = null;
+    this.currentQRImage = null;
+    this.currentPairingCode = null;
+    this.status = 'connecting';
+    await delay(1000);
+    await this.start();
+  }
+
+  async clearAndReset() {
+    console.log('[WhatsAppClient] Tüm oturum sıfırlanıyor (temiz başlangıç)...');
+    try {
+      if (this.sock) {
+        this.sock.end(new Error('Manual Reset'));
+      }
+    } catch (e) {}
+    await this.sessionStore.clearSession();
+    this.status = 'disconnected';
+    this.connectedUser = null;
+    this.currentQR = null;
+    this.currentQRImage = null;
+    this.currentPairingCode = null;
+    this.isStarting = false;
+    await delay(1500);
+    await this.start();
+  }
+
+
   async start() {
     if (this.isStarting) return;
     this.isStarting = true;
@@ -49,7 +85,9 @@ class WhatsAppClient {
         logger,
         auth: state,
         printQRInTerminal: false, // Terminali kirletme, web üzerinden göster
-        browser: ['Berber-X Randevu', 'Chrome', '1.0.0'],
+        browser: Browsers.ubuntu('Chrome'),
+        syncFullHistory: false,
+        markOnlineOnConnect: false,
         connectTimeoutMs: 60000,
         keepAliveIntervalMs: 25000,
         emitOwnEvents: false
@@ -141,24 +179,43 @@ class WhatsAppClient {
       throw new Error('Zaten bağlı bir WhatsApp oturumu mevcut.');
     }
 
-    // Telefonu sadece rakamlara temizle (Örn: 905524512619)
-    let phone = rawPhoneNumber.replace(/\D/g, '');
+    // Telefon numarasını temizle (Örn: 905422628830)
+    let phone = String(rawPhoneNumber || '').replace(/\D/g, '');
     if (phone.startsWith('0')) phone = '90' + phone.slice(1);
     if (!phone.startsWith('90')) phone = '90' + phone;
 
+    if (phone.length < 10) {
+      throw new Error('Geçersiz telefon numarası! Lütfen en az 10 haneli numara girin.');
+    }
+
     console.log(`[WhatsAppClient] ${phone} için Eşleşme Kodu isteniyor...`);
+
+    // Soket yoksa veya kapalıysa yeniden başlat
+    if (!this.sock || this.status === 'disconnected') {
+      await this.restart();
+      await delay(3000);
+    }
 
     try {
       // 8 karakterli eşleşme kodu üretir (örn: ABCD1234)
       const code = await this.sock.requestPairingCode(phone);
-      // Okunabilirlik için XXXX-XXXX formatına çevir
       const formatted = code ? (code.slice(0, 4) + '-' + code.slice(4)) : code;
       this.currentPairingCode = formatted;
       console.log(`[WhatsAppClient] ✅ Eşleşme Kodu Hazır: ${formatted}`);
       return formatted;
     } catch (err) {
-      console.error('[WhatsAppClient] Eşleşme kodu alma hatası:', err.message);
-      throw err;
+      console.warn('[WhatsAppClient] Eşleşme kodu ilk denemede hata verdi, soket sıfırlanıp 1 kez daha deneniyor:', err.message);
+      try {
+        await this.restart();
+        await delay(3500);
+        const code = await this.sock.requestPairingCode(phone);
+        const formatted = code ? (code.slice(0, 4) + '-' + code.slice(4)) : code;
+        this.currentPairingCode = formatted;
+        return formatted;
+      } catch (retryErr) {
+        console.error('[WhatsAppClient] İkinci denemede de eşleşme kodu alınamadı:', retryErr.message);
+        throw retryErr;
+      }
     }
   }
 
