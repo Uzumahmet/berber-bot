@@ -28,15 +28,8 @@ class RealtimeListener {
           'postgres_changes',
           { event: 'INSERT', schema: 'public', table: 'berber_appointments' },
           async (payload) => {
-            console.log('[RealtimeListener] ⚡ Yeni randevu kaydedildi (INSERT):', payload.new?.id);
+            console.log('[RealtimeListener] ⚡ Yeni randevu oluşturuldu (INSERT):', payload.new?.id);
             await this.handleNewAppointment(payload.new);
-          }
-        )
-        .on(
-          'postgres_changes',
-          { event: 'UPDATE', schema: 'public', table: 'berber_appointments' },
-          async (payload) => {
-            await this.handleAppointmentUpdate(payload.old, payload.new);
           }
         )
         .subscribe((status) => {
@@ -48,7 +41,8 @@ class RealtimeListener {
   }
 
   /**
-   * Siteden yeni randevu alındığında müşteriye anında WhatsApp teyidi gönderir
+   * Siteden yeni randevu oluşturulduğunda müşteriye tek seferlik anında WhatsApp teyidi gönderir
+   * (Kullanıcı Kuralı 1: Sadece randevu yapıldığında mesaj gider)
    */
   async handleNewAppointment(r) {
     if (!r || !r.customer_phone || !this.wa || this.wa.status !== 'connected') {
@@ -71,28 +65,6 @@ class RealtimeListener {
       await this.wa.sendMessage(r.customer_phone, mesaj);
     } catch (err) {
       console.error('[RealtimeListener] Onay mesajı gönderim hatası:', err.message);
-    }
-  }
-
-  /**
-   * Randevu durumu değiştiğinde (Örn: Onaylandı)
-   */
-  async handleAppointmentUpdate(oldRow, newRow) {
-    if (!newRow || !this.wa || this.wa.status !== 'connected') return;
-
-    // Berber panelden "Onayla" butonuna bastıysa müşteriye bildirim
-    if (oldRow && oldRow.status === 'bekliyor' && newRow.status === 'onaylandi') {
-      const tarihTr = formatTarihTr(newRow.preferred_date);
-      const mesaj = `Sayın ${newRow.customer_name} 👋\n\n` +
-                    `${tarihTr} saat ${newRow.preferred_time} için randevunuz berberimiz tarafından ONAYLANMIŞTIR. ✅\n\n` +
-                    `Sizi ağırlamaktan mutluluk duyacağız! 💈`;
-
-      try {
-        console.log(`[RealtimeListener] Randevu onay bildirimi gönderiliyor -> ${newRow.customer_phone}`);
-        await this.wa.sendMessage(newRow.customer_phone, mesaj);
-      } catch (err) {
-        console.error('[RealtimeListener] Onay güncelleme mesajı hatası:', err.message);
-      }
     }
   }
 
