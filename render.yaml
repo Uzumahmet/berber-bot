@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: berber-whatsapp-bot
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: SUPABASE_URL
+        value: https://rkqrlhkdcgspxpgywvtq.supabase.co
+      - key: SUPABASE_KEY
+        value: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJrcXJsaGtkY2dzcHhwZ3l3dnRxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg1MDk1NzksImV4cCI6MjEwNDA4NTU3OX0.7M-fQC6zQSNZsrmDEu7dh6kApxpn9aHnCRbCZtXoh18
+      - key: SESSION_ID
+        value: berber_main
+      - key: DEFAULT_PHONE
+        value: "05524512619"

@@ -1,0 +1,29 @@
+{
+  "name": "berber-whatsapp-bot",
+  "version": "1.0.0",
+  "description": "Berber-X için 0 TL Bulut WhatsApp Otomasyon & Hatırlatma Mikroservisi",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "keywords": [
+    "whatsapp",
+    "baileys",
+    "berber",
+    "randevu",
+    "supabase"
+  ],
+  "author": "Berber-X",
+  "license": "ISC",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.49.1",
+    "@whiskeysockets/baileys": "^6.7.12",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "node-cron": "^3.0.3",
+    "pino": "^9.6.0",
+    "qrcode": "^1.5.4"
+  }
+}
