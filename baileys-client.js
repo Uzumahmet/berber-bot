@@ -124,7 +124,7 @@ class WhatsAppClient {
           this.connectedUser = {
             id: rawId,
             phone: phone ? `+${phone}` : 'Bilinmiyor',
-            name: this.sock.user?.name || 'Berberim'
+            name: this.sock.user?.name || 'BERBER-X'
           };
 
           console.log(`[WhatsAppClient] 🟢 WHATSAPP BAĞLANDI! Kullanıcı: ${this.connectedUser.phone} (${this.connectedUser.name})`);
@@ -262,6 +262,9 @@ class WhatsAppClient {
 
     const result = await this.sock.sendMessage(jid, { text: message });
     console.log(`[WhatsAppClient] ✅ Mesaj başarıyla iletildi: ${clean}`);
+    
+    // Mesaj sonrası güncellenen kripto oturum anahtarlarını Supabase'e yedekle
+    this.sessionStore.scheduleSyncToSupabase();
     return result;
   }
 

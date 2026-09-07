@@ -54,7 +54,7 @@ class RealtimeListener {
     const tarihTr = formatTarihTr(r.preferred_date);
 
     const mesaj = `Merhaba ${r.customer_name} 👋\n\n` +
-                  `Berberim Saç Tasarım Salonu'ndan${vipEtiket} randevunuz başarıyla oluşturuldu! ✅\n\n` +
+                  `BERBER-X Saç Tasarım Salonu'ndan${vipEtiket} randevunuz başarıyla oluşturuldu! ✅\n\n` +
                   `📅 Tarih: ${tarihTr}\n` +
                   `⏰ Saat: ${r.preferred_time}\n` +
                   `💈 İşlem: ${r.service_type}\n\n` +

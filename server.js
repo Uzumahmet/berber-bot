@@ -519,4 +519,18 @@ app.listen(PORT, async () => {
   // Hatırlatıcı cron ve realtime dinleyicisini başlat
   reminderService.start();
   realtimeListener.start();
+
+  // Render 7/24 uyanık tutma döngüsü (9 dakikada bir kendi sağlık kontrolüne sinyal atar)
+  const KEEP_ALIVE_URL = process.env.RENDER_EXTERNAL_URL || 'https://berber-bot-ta0p.onrender.com';
+  setInterval(async () => {
+    try {
+      const fetchFn = typeof global.fetch === 'function' ? global.fetch : null;
+      if (fetchFn) {
+        const res = await fetchFn(`${KEEP_ALIVE_URL}/health`);
+        console.log(`[KeepAlive] 💓 Canlılık pingi başarılı: ${res.status}`);
+      }
+    } catch (err) {
+      console.warn('[KeepAlive] Ping uyarısı:', err.message);
+    }
+  }, 9 * 60 * 1000);
 });
