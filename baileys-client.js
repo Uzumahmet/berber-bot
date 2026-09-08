@@ -26,6 +26,7 @@ class WhatsAppClient {
     this.connectedUser = null;
     this.isStarting = false;
     this._reconnectTimer = null;
+    this._messageCache = new Map();
   }
 
   async restart() {
@@ -87,10 +88,19 @@ class WhatsAppClient {
         printQRInTerminal: false, // Terminali kirletme, web üzerinden göster
         browser: Browsers.ubuntu('Chrome'),
         syncFullHistory: false,
-        markOnlineOnConnect: false,
+        markOnlineOnConnect: true, // Telefon ile senkronizasyonun canlı kalmasını sağlar
         connectTimeoutMs: 60000,
-        keepAliveIntervalMs: 25000,
-        emitOwnEvents: false
+        keepAliveIntervalMs: 15000,
+        emitOwnEvents: false,
+        getMessage: async (key) => {
+          // Alıcının telefonu şifre çözme anahtarı istediğinde (Retry Request) mesajı geri döndürür
+          if (this._messageCache && this._messageCache.has(key?.id)) {
+            return this._messageCache.get(key.id);
+          }
+          return {
+            conversation: 'BERBER-X Randevu Bilgilendirmesi'
+          };
+        }
       });
 
       // Credential güncellemelerini yakala ve Supabase'e yedekle
@@ -261,6 +271,13 @@ class WhatsAppClient {
     await delay(randomDelay);
 
     const result = await this.sock.sendMessage(jid, { text: message });
+    if (result?.key?.id && result?.message) {
+      this._messageCache.set(result.key.id, result.message);
+      if (this._messageCache.size > 200) {
+        const oldestKey = this._messageCache.keys().next().value;
+        this._messageCache.delete(oldestKey);
+      }
+    }
     console.log(`[WhatsAppClient] ✅ Mesaj başarıyla iletildi: ${clean}`);
     
     // Mesaj sonrası güncellenen kripto oturum anahtarlarını Supabase'e yedekle
