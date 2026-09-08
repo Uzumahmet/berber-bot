@@ -5,6 +5,7 @@ const { createClient } = require('@supabase/supabase-js');
 const WhatsAppClient = require('./baileys-client');
 const ReminderService = require('./reminder-service');
 const RealtimeListener = require('./realtime-listener');
+const ConcurrencyLock = require('./concurrency-lock');
 
 const PORT = process.env.PORT || 3000;
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://rkqrlhkdcgspxpgywvtq.supabase.co';
@@ -32,7 +33,10 @@ const wa = new WhatsAppClient({
   authDir: AUTH_DIR
 });
 
-// 3. Hatırlatıcı & Realtime Servisleri
+// 3. Concurrency (Eşzamanlı Başlatma) Kilidi
+const concurrencyLock = new ConcurrencyLock(supabase, SESSION_ID);
+
+// 4. Hatırlatıcı & Realtime Servisleri
 const reminderService = new ReminderService(supabase, wa);
 const realtimeListener = new RealtimeListener(supabase, wa);
 
@@ -46,7 +50,8 @@ app.use(express.urlencoded({ extended: true }));
    API ENDPOINT'LERİ
    ───────────────────────────────────────────── */
 
-// Sağlık kontrolü
+// Sağlık kontrolü (Harici cron-job ve Render için)
+// ÖNEMLİ: Bu endpoint ASLA Baileys soketini yeniden başlatmaz, sadece mevcut durumu okur.
 app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
@@ -510,13 +515,16 @@ app.get('/', (req, res) => {
 /* ─────────────────────────────────────────────
    SUNUCUYU VE ARKA PLAN SERVİSLERİNİ BAŞLAT
    ───────────────────────────────────────────── */
-app.listen(PORT, async () => {
+const server = app.listen(PORT, async () => {
   console.log(`[BerberBot] 🚀 Sunucu ${PORT} portunda çalışıyor: http://localhost:${PORT}`);
   
-  // WhatsApp soketini başlat
+  // 1. Eşzamanlı başlatma koruması (Cron-job veya rolling deploy kaynaklı çift soket çakışmasını engeller)
+  await concurrencyLock.acquireLock();
+
+  // 2. WhatsApp soketini başlat
   await wa.start();
 
-  // Hatırlatıcı cron ve realtime dinleyicisini başlat
+  // 3. Hatırlatıcı cron ve realtime dinleyicisini başlat
   reminderService.start();
   realtimeListener.start();
 
@@ -534,3 +542,45 @@ app.listen(PORT, async () => {
     }
   }, 9 * 60 * 1000);
 });
+
+/* ─────────────────────────────────────────────
+   GRACEFUL SHUTDOWN (DÜZGÜN KAPANMA YÖNETİMİ)
+   Render sunucusu kapanırken veya yeniden başlatılırken
+   son oturum anahtarlarını Supabase'e eksiksiz eşitler.
+   ───────────────────────────────────────────── */
+let isShuttingDown = false;
+async function gracefulShutdown(signal) {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+  console.log(`\n[BerberBot] 🛑 ${signal} sinyali alındı. Kapanış prosedürü başlatılıyor...`);
+
+  // Sunucunun yeni HTTP istekleri kabul etmesini durdur
+  if (server) {
+    server.close(() => {
+      console.log('[BerberBot] 🔌 HTTP sunucusu yeni isteklere kapatıldı.');
+    });
+  }
+
+  try {
+    // 1. Son oturum anahtarlarını Supabase'e zorla AWAIT ederek senkronize et
+    if (wa && wa.sessionStore) {
+      console.log('[BerberBot] 💾 Kapanış öncesi son oturum anahtarları Supabase\'e senkronize ediliyor...');
+      await wa.sessionStore.syncToSupabase();
+      console.log('[BerberBot] ✅ Oturum anahtarları Supabase\'e başarıyla kaydedildi.');
+    }
+
+    // 2. Concurrency kilidini serbest bırak
+    if (concurrencyLock) {
+      await concurrencyLock.releaseLock();
+    }
+
+    console.log('[BerberBot] 🏁 Temiz kapanış tamamlandı. Hoşça kalın.');
+  } catch (err) {
+    console.error('[BerberBot] ⚠️ Kapanış senkronizasyonunda hata:', err.message);
+  } finally {
+    process.exit(0);
+  }
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));

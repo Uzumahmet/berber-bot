@@ -10,6 +10,7 @@ const pino = require('pino');
 const qrcode = require('qrcode');
 const path = require('path');
 const SessionStore = require('./session-store');
+const MessageCache = require('./message-cache');
 
 class WhatsAppClient {
   constructor(options = {}) {
@@ -17,6 +18,8 @@ class WhatsAppClient {
     this.sessionId = options.sessionId || 'berber_main';
     this.authDir = options.authDir || path.resolve('./auth_info');
     this.sessionStore = new SessionStore(this.supabase, this.sessionId, this.authDir);
+    this.messageCache = new MessageCache(this.supabase);
+    this.messageCache.startCleanupCron();
 
     this.sock = null;
     this.status = 'disconnected'; // 'connecting' | 'connected' | 'disconnected'
@@ -26,7 +29,6 @@ class WhatsAppClient {
     this.connectedUser = null;
     this.isStarting = false;
     this._reconnectTimer = null;
-    this._messageCache = new Map();
   }
 
   async restart() {
@@ -93,13 +95,23 @@ class WhatsAppClient {
         keepAliveIntervalMs: 15000,
         emitOwnEvents: false,
         getMessage: async (key) => {
-          // Alıcının telefonu şifre çözme anahtarı istediğinde (Retry Request) mesajı geri döndürür
-          if (this._messageCache && this._messageCache.has(key?.id)) {
-            return this._messageCache.get(key.id);
+          // Alıcının telefonu şifre çözme anahtarı istediğinde (Retry Request) orijinal mesajı döndürür.
+          // Önce RAM önbelleğine, ardından Supabase whatsapp_message_cache tablosuna bakar.
+          if (!key?.id) return undefined;
+
+          try {
+            const cached = await this.messageCache.get(key.id);
+            if (cached) {
+              return cached;
+            }
+          } catch (e) {
+            console.warn('[WhatsAppClient] getMessage önbellek okuma hatası:', e.message);
           }
-          return {
-            conversation: 'BERBER-X Randevu Bilgilendirmesi'
-          };
+
+          // Önbellekte yoksa KESİNLİKLE sabit/placeholder metin DÖNÜLMEZ!
+          // Placeholder dönüldüğünde şifreleme imzası tutarsızlaşır ve kalıcı "mesaj bekleniyor" hatası oluşur.
+          // Baileys 'undefined' döndüğünde protokolü doğru şekilde idare eder.
+          return undefined;
         }
       });
 
@@ -272,11 +284,8 @@ class WhatsAppClient {
 
     const result = await this.sock.sendMessage(jid, { text: message });
     if (result?.key?.id && result?.message) {
-      this._messageCache.set(result.key.id, result.message);
-      if (this._messageCache.size > 200) {
-        const oldestKey = this._messageCache.keys().next().value;
-        this._messageCache.delete(oldestKey);
-      }
+      // Mesajı hem RAM'e hem de Supabase whatsapp_message_cache tablosuna kaydet
+      await this.messageCache.set(result.key.id, result.message);
     }
     console.log(`[WhatsAppClient] ✅ Mesaj başarıyla iletildi: ${clean}`);
     

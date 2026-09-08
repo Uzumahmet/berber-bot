@@ -31,7 +31,17 @@ class SessionStore {
   async restoreFromSupabase() {
     if (!this.supabase) return;
     try {
-      console.log('[SessionStore] Supabase üzerinden oturum kontrol ediliyor...');
+      // 1. Yerel auth dizini doluysa (dosya sayısı > 0), Supabase'den geri yüklemeyi TAMAMEN atla!
+      // Amaç: Yereldeki daha güncel oturum dosyalarının üzerine eski/stale veri yazılmasını engellemek.
+      if (fs.existsSync(this.authDir)) {
+        const existingFiles = fs.readdirSync(this.authDir).filter(f => !f.startsWith('.'));
+        if (existingFiles.length > 0) {
+          console.log(`[SessionStore] ℹ️ Yerel oturum dizini dolu (${existingFiles.length} dosya mevcut). Supabase'den geri yükleme atlanıyor, yerel güncel veriler korunuyor.`);
+          return;
+        }
+      }
+
+      console.log('[SessionStore] Yerel oturum boş. Supabase üzerinden oturum kontrol ediliyor...');
       const { data, error } = await this.supabase
         .from('whatsapp_sessions')
         .select('key_id, data')
@@ -109,6 +119,8 @@ class SessionStore {
 
         if (!error) {
           console.log(`[SessionStore] ☁️ ${records.length} oturum anahtarı Supabase'e güvenle yedeklendi.`);
+        } else {
+          console.warn(`[SessionStore] ⚠️ Supabase oturum yedekleme reddedildi:`, error.message);
         }
       }
     } catch (err) {
